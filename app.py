@@ -70,7 +70,7 @@ def load_data(json_path, csv_path):
 # --- 5. Main Application UI ---
 def main():
     st.set_page_config(layout="wide", page_title="OCR Visualiser")
-    st.title("📄 OCR Evaluation Visualiser")
+    st.title("OCR Evaluation Visualiser")
 
     # Custom CSS for text blocks and highlighting
     st.markdown("""
