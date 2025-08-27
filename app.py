@@ -113,8 +113,7 @@ def main():
                     image_path = os.path.join(IMAGE_BASE_DIRECTORY, selected_language_folder, image_filename)
                     try:
                         image = Image.open(image_path)
-                        # MODIFICATION: Reverted to use_column_width to make it fit the grid properly.
-                        st.image(image, caption=image_filename, use_column_width='always')
+                        st.image(image, caption=image_filename, use_container_width=True)
                     except FileNotFoundError:
                         st.error(f"Image not found at: {image_path}")
                         st.warning("Please verify paths and ensure the image file exists.")
