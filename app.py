@@ -2,24 +2,14 @@ import streamlit as st
 import json
 from PIL import Image
 import os
+import pandas as pd
 
 # --- 1. Configuration ---
-
-# ❌ OLD PATHS (WILL NOT WORK)
-# JSON_FILE_PATH = '/Users/oikantik/eval-set/v1filt_v2_lr2e-5-ve-proj-llm_ignorepunc.json'
-# IMAGE_BASE_DIRECTORY = '/Users/oikantik/eval-set/'
-
-# ✅ NEW RELATIVE PATHS (CORRECT FOR DEPLOYMENT)
-JSON_FILE_PATH = 'v1filt_v2_lr2e-5-ve-proj-llm_ignorepunc.json' 
-IMAGE_BASE_DIRECTORY = '.' 
-
-# # --- 1. Configuration ---
-# # IMPORTANT: Update these paths to match your local file locations.
-# JSON_FILE_PATH = '/Users/oikantik/eval-set/v1filt_v2_lr2e-5-ve-proj-llm_ignorepunc.json'
-# IMAGE_BASE_DIRECTORY = '/Users/oikantik/eval-set/'  # This is the root directory containing the language folders.
+JSON_FILE_PATH = 'v1filt_v2_lr2e-5-ve-proj-llm_ignorepunc.json'
+CSV_FILE_PATH = 'results.csv'  # Path to your new CSV file
+IMAGE_BASE_DIRECTORY = '.'
 
 # --- 2. Language Mappings ---
-# This dictionary maps the language short codes (from the JSON) to the folder names (from your image).
 LANG_CODE_TO_FOLDER = {
     'bn': 'Bengali',
     'en': 'English',
@@ -34,51 +24,55 @@ LANG_CODE_TO_FOLDER = {
     'te': 'Telugu'
 }
 
-# Invert the mapping to easily find the language code from a selected folder name.
 FOLDER_TO_LANG_CODE = {v: k for k, v in LANG_CODE_TO_FOLDER.items()}
 AVAILABLE_LANGUAGES = sorted(list(LANG_CODE_TO_FOLDER.values()))
 
 # --- 3. Data Loading Function ---
-@st.cache_data  # Caches the data to avoid reloading on every interaction.
-def load_data(json_path):
+@st.cache_data
+def load_data(json_path, csv_path):
     """
-    Loads the JSON data from the specified path.
-    Returns a dictionary of data organized by language code, or None if an error occurs.
+    Loads data from both JSON and CSV files, then merges them.
     """
+    # Load the primary data from the JSON file
     try:
         with open(json_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        
-        # Organize data into a dictionary for quick filtering.
-        data_by_lang = {}
-        for item in data:
-            try:
-                # The language code is the second part of the 'image_name' (e.g., 'br_te_000489_0_0' -> 'te').
-                lang_code = item['image_name'].split('_')[1]
-                if lang_code not in data_by_lang:
-                    data_by_lang[lang_code] = []
-                data_by_lang[lang_code].append(item)
-            except IndexError:
-                # Handle cases where image_name format might be unexpected.
-                st.warning(f"Skipping item with unexpected image_name format: {item.get('image_name', 'N/A')}")
-        return data_by_lang
+            json_data = json.load(f)
     except FileNotFoundError:
-        st.error(f"❌ Error: The JSON file was not found at '{json_path}'.")
-        st.info("Please update the `JSON_FILE_PATH` variable at the top of the script.")
+        st.error(f"❌ Error: JSON file not found at '{json_path}'.")
         return None
-    except json.JSONDecodeError:
-        st.error(f"❌ Error: Could not decode the JSON file. Please ensure it's a valid JSON.")
-        return None
+
+    # Load the modification data from the CSV and create a mapping
+    try:
+        csv_df = pd.read_csv(csv_path)
+        # Create a dictionary for quick lookup: image_name -> corr_mod
+        corr_mod_map = pd.Series(csv_df.corr_mod.values, index=csv_df.image_name).to_dict()
+    except FileNotFoundError:
+        st.warning(f"⚠️ Warning: CSV file not found at '{csv_path}'. 'corr_mod' data will not be available.")
+        corr_mod_map = {} # Use an empty map if the file is missing
+
+    # Organize data by language and inject the corr_mod details
+    data_by_lang = {}
+    for item in json_data:
+        try:
+            lang_code = item['image_name'].split('_')[1]
+            # Add the corr_mod data to each item using the map
+            item['corr_mod'] = corr_mod_map.get(item['image_name'], 'N/A')
+            
+            if lang_code not in data_by_lang:
+                data_by_lang[lang_code] = []
+            data_by_lang[lang_code].append(item)
+        except IndexError:
+            st.warning(f"Skipping item with unexpected image_name format: {item.get('image_name', 'N/A')}")
+            
+    return data_by_lang
 
 # --- 4. Main Application UI ---
 def main():
-    """
-    The main function that defines the Streamlit app's layout and logic.
-    """
     st.set_page_config(layout="wide", page_title="OCR Visualiser")
     st.title("📄 OCR Evaluation Visualiser")
 
-    all_data = load_data(JSON_FILE_PATH)
+    # Load the combined data
+    all_data = load_data(JSON_FILE_PATH, CSV_FILE_PATH)
     if not all_data:
         return
 
@@ -105,7 +99,6 @@ def main():
             if selected_record:
                 st.markdown("---")
                 
-                # --- Top Row: Image and Ground Truth ---
                 col1, col2 = st.columns(2)
                 with col1:
                     st.subheader("Image Snippet")
@@ -116,13 +109,11 @@ def main():
                         st.image(image, caption=image_filename, use_container_width=True)
                     except FileNotFoundError:
                         st.error(f"Image not found at: {image_path}")
-                        st.warning("Please verify paths and ensure the image file exists.")
                 
                 with col2:
                     st.subheader("Ground Truth (`gt`)")
                     st.text_area("gt", value=selected_record.get('gt', ''), height=150, key="gt_text", label_visibility="collapsed")
 
-                # --- Bottom Row: Prediction and Corrected ---
                 col3, col4 = st.columns(2)
                 with col3:
                     st.subheader("Prediction (`pred`)")
@@ -131,9 +122,13 @@ def main():
                 with col4:
                     st.subheader("Corrected (`corr`)")
                     st.text_area("corr", value=selected_record.get('corr', ''), height=150, key="corr_text", label_visibility="collapsed")
-    else:
-        st.warning(f"No data found in the JSON file for the language code: '{selected_lang_code}'.")
+                    
+                    # ✅ NEW: Display the corr_mod data
+                    st.markdown("###### Modification Details")
+                    st.code(selected_record.get('corr_mod', 'N/A'), language=None)
 
-# --- 5. Run the App ---
+    else:
+        st.warning(f"No data found for the language code: '{selected_lang_code}'.")
+
 if __name__ == "__main__":
     main()
